@@ -15,6 +15,8 @@ from vocos_mlx import Vocos
 
 import soundfile as sf
 
+from pathlib import Path
+
 SAMPLE_RATE = 24_000
 HOP_LENGTH = 256
 FRAMES_PER_SEC = SAMPLE_RATE / HOP_LENGTH
@@ -24,11 +26,12 @@ TARGET_RMS = 0.1
 def generate(
     generation_text: str,
     duration: Optional[float] = None,
-    model_name: str = "lucasnewman/f5-tts-mlx",
+    model_name: str = "f5-tts",
     ref_audio_path: Optional[str] = None,
     ref_audio_text: Optional[str] = None,
     cfg_strength: float = 2.0,
     sway_sampling_coef: float = -1.0,
+    steps: int = 32,
     speed: float = 1.0, # used when duration is None as part of the duration heuristic
     seed: Optional[int] = None,
     output_path: str = "output.wav",
@@ -62,7 +65,7 @@ def generate(
 
     # generate the audio for the given text
     text = convert_char_to_pinyin([ref_audio_text + " " + generation_text])
-    
+
     # use a heuristic to determine the duration if not provided
     if duration is None:
         ref_audio_len = audio.shape[0] // HOP_LENGTH
@@ -77,13 +80,13 @@ def generate(
     print(f"Generating {frame_duration} total frames of audio...")
 
     start_date = datetime.datetime.now()
-    vocos = Vocos.from_pretrained("lucasnewman/vocos-mel-24khz")
+    vocos = Vocos.from_pretrained(Path.cwd() / "models/vocos-mel-24khz")
 
     wave, _ = f5tts.sample(
         mx.expand_dims(audio, axis=0),
         text=text,
         duration=frame_duration,
-        steps=32,
+        steps=steps,
         cfg_strength=cfg_strength,
         sway_sampling_coef=sway_sampling_coef,
         seed=seed,
@@ -108,7 +111,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="lucasnewman/f5-tts-mlx",
+        default="f5-tts",
         help="Name of the model to use",
     )
     parser.add_argument(
@@ -162,6 +165,12 @@ if __name__ == "__main__":
         default=None,
         help="Seed for noise generation",
     )
+    parser.add_argument(
+        "--step",
+        type=int,
+        default=32,
+        help="Step count for ODE sampling",
+    )
 
     args = parser.parse_args()
 
@@ -173,6 +182,7 @@ if __name__ == "__main__":
         ref_audio_text=args.ref_text,
         cfg_strength=args.cfg,
         sway_sampling_coef=args.sway_coef,
+        steps=args.step,
         speed=args.speed,
         seed=args.seed,
         output_path=args.output,

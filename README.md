@@ -1,8 +1,10 @@
 ![F5 TTS diagram](f5tts.jpg)
 
-# F5 TTS — MLX
+# F5 TTS — MLX (FP16)
 
 Implementation of [F5-TTS](https://arxiv.org/abs/2410.06885), with the [MLX](https://github.com/ml-explore/mlx) framework.
+
+This modified version is optimized for FP16 models, enabling faster inference speeds without compromising output quality.
 
 F5 TTS is a non-autoregressive, zero-shot text-to-speech system using a flow-matching mel spectrogram generator with a diffusion transformer (DiT).
 
@@ -53,6 +55,18 @@ audio = f5tts.sample(...)
 
 Pretrained model weights are also available [on Hugging Face](https://huggingface.co/lucasnewman/f5-tts-mlx).
 
+## Convert Models from F32 to F16
+
+```python
+import torch
+from safetensors import safe_open
+from safetensors.mlx import save_file
+
+with safe_open('model_f32.safetensors', framework='pt') as f:
+	quantized_model = {key: (f.get_tensor(key).half() if f.get_tensor(key).dtype == torch.float32 else f.get_tensor(key)) for key in list(f.keys())}
+    save_file(quantized_model, 'model_f16.safetensors')
+```
+
 ## Appreciation
 
 [Yushen Chen](https://github.com/SWivid) for the original Pytorch implementation of F5 TTS and pretrained model.
@@ -63,7 +77,7 @@ Pretrained model weights are also available [on Hugging Face](https://huggingfac
 
 ```bibtex
 @article{chen-etal-2024-f5tts,
-      title={F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching}, 
+      title={F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching},
       author={Yushen Chen and Zhikang Niu and Ziyang Ma and Keqi Deng and Chunhui Wang and Jian Zhao and Kai Yu and Xie Chen},
       journal={arXiv preprint arXiv:2410.06885},
       year={2024},

@@ -23,6 +23,8 @@ from f5_tts_mlx.modules import MelSpec
 
 from huggingface_hub import snapshot_download
 
+from tqdm import trange
+
 
 def fetch_from_hub(hf_repo: str) -> Path:
     model_path = Path(
@@ -145,7 +147,7 @@ def list_str_to_idx(
     list_idx_tensors = [
         [vocab_char_map.get(c, 0) for c in t] for t in text
     ]  # pinyin or char style
-    
+
     list_idx_tensors = [mx.array(t) for t in list_idx_tensors]
     text = pad_sequence(list_idx_tensors, padding_value=padding_value)
     return text
@@ -295,7 +297,7 @@ class F5TTS(nn.Module):
         ys = [y0]
         y_current = y0
 
-        for i in range(len(t) - 1):
+        for i in trange(len(t) - 1, desc="ODE Sampling"):
             t_current = t[i]
             dt = t[i + 1] - t_current
 
@@ -306,7 +308,7 @@ class F5TTS(nn.Module):
             # compute the next value
             k2 = func(t_current + 0.5 * dt, mid)
             y_next = y_current + dt * k2
-
+            mx.eval(y_next)
             ys.append(y_next)
             y_current = y_next
 
@@ -378,8 +380,7 @@ class F5TTS(nn.Module):
         cond_mask = rearrange(cond_mask, "... -> ... 1")
         step_cond = mx.where(
             cond_mask, cond, mx.zeros_like(cond)
-        )  # allow direct control (cut cond audio) with lens passed in
-
+        ).astype(mx.float16)  # allow direct control (cut cond audio) with lens passed in
         if batch > 1:
             mask = lens_to_mask(duration)
         else:
@@ -404,7 +405,7 @@ class F5TTS(nn.Module):
                 mask=mask,
                 drop_audio_cond=False,
                 drop_text=False,
-            )
+            ).astype(mx.float16)
             if cfg_strength < 1e-5:
                 return pred
 
@@ -416,7 +417,7 @@ class F5TTS(nn.Module):
                 mask=mask,
                 drop_audio_cond=True,
                 drop_text=True,
-            )
+            ).astype(mx.float16)
             return pred + (pred - null_pred) * cfg_strength
 
         # noise input
@@ -426,12 +427,12 @@ class F5TTS(nn.Module):
         for dur in duration:
             if exists(seed):
                 mx.random.seed(seed)
-            y0.append(mx.random.normal((dur, self.num_channels)))
+            y0.append(mx.random.normal((dur, self.num_channels), dtype=mx.float16))
         y0 = pad_sequence(y0, padding_value=0)
 
         t_start = 0
 
-        t = mx.linspace(t_start, 1, steps)
+        t = mx.linspace(t_start, 1, steps, dtype=mx.float16)
         if exists(sway_sampling_coef):
             t = t + sway_sampling_coef * (mx.cos(mx.pi / 2 * t) - 1 + t)
 
@@ -443,7 +444,7 @@ class F5TTS(nn.Module):
 
         if exists(vocoder):
             out = vocoder(out)
-            
+
         mx.eval(out)
 
         return out, trajectory
@@ -453,30 +454,33 @@ class F5TTS(nn.Module):
         cls,
         hf_model_name_or_path: str
     ) -> F5TTS:
-        path = fetch_from_hub(hf_model_name_or_path)
-        
+        # path = fetch_from_hub(hf_model_name_or_path)
+
+        path = Path.cwd() / "models" / hf_model_name_or_path
+
         if path is None:
             raise ValueError(f"Could not find model {hf_model_name_or_path}")
 
         model_path = path / "model.safetensors"
         vocab_path = path / "vocab.txt"
         vocab = {v: i for i, v in enumerate(Path(vocab_path).read_text().split("\n"))}
-        
+
+        transformer = DiT(
+            dim=1024,
+            depth=22,
+            heads=16,
+            ff_mult=2,
+            text_dim=512,
+            conv_layers=4,
+            text_num_embeds=len(vocab) - 1,
+        )
         f5tts = F5TTS(
-            transformer=DiT(
-                dim=1024,
-                depth=22,
-                heads=16,
-                ff_mult=2,
-                text_dim=512,
-                conv_layers=4,
-                text_num_embeds=len(vocab) - 1,
-            ),
+            transformer=transformer,
             vocab_char_map=vocab,
         )
-        
+
         weights = mx.load(model_path.as_posix(), format="safetensors")
         f5tts.load_weights(list(weights.items()))
         mx.eval(f5tts.parameters())
-        
+
         return f5tts

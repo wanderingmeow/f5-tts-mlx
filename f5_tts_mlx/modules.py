@@ -80,7 +80,7 @@ def precompute_freqs_cis(
     freqs = mx.outer(t, freqs).astype(mx.float32)  # type: ignore
     freqs_cos = freqs.cos()  # real part
     freqs_sin = freqs.sin()  # imaginary part
-    return mx.concatenate([freqs_cos, freqs_sin], axis=-1)
+    return mx.array(mx.concatenate([freqs_cos, freqs_sin], axis=-1), dtype=mx.float16)
 
 
 def get_pos_embed_indices(start, length, max_pos, scale=1.0):
@@ -127,7 +127,7 @@ def mel_filters(n_mels: int) -> mx.array:
     Saved using extract_filterbank.py
     """
     assert n_mels in {100}, f"Unsupported n_mels: {n_mels}"
-    
+
     # try to pull the filterbank from the package
     data = pkgutil.get_data('f5_tts_mlx', 'assets/mel_filters.npz')
     if data is not None:
@@ -331,7 +331,7 @@ class AdaLayerNormZero(nn.Module):
         super().__init__()
         self.silu = nn.SiLU()
         self.linear = nn.Linear(dim, dim * 6)
-        self.norm = nn.LayerNorm(dim, affine=False, eps=1e-6)
+        # self.norm = nn.LayerNorm(dim, affine=False, eps=1e-6, bias=False)
 
     def __call__(self, x: mx.array, emb: mx.array | None = None) -> mx.array:
         emb = self.linear(self.silu(emb))
@@ -339,7 +339,9 @@ class AdaLayerNormZero(nn.Module):
             emb, 6, axis=1
         )
 
-        x = self.norm(x) * (1 + mx.expand_dims(scale_msa, axis=1)) + mx.expand_dims(
+        x_norm = mx.fast.layer_norm(x, weight=None, bias=None, eps=1e-6)
+
+        x = x_norm * (1 + mx.expand_dims(scale_msa, axis=1)) + mx.expand_dims(
             shift_msa, axis=1
         )
         return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
@@ -354,13 +356,14 @@ class AdaLayerNormZero_Final(nn.Module):
         super().__init__()
         self.silu = nn.SiLU()
         self.linear = nn.Linear(dim, dim * 2)
-        self.norm = nn.LayerNorm(dim, affine=False, eps=1e-6)
+        # self.norm = nn.LayerNorm(dim, affine=False, eps=1e-6)
 
     def __call__(self, x: mx.array, emb: mx.array | None = None) -> mx.array:
         emb = self.linear(self.silu(emb))
         scale, shift = mx.split(emb, 2, axis=1)
 
-        x = self.norm(x) * (1 + mx.expand_dims(scale, axis=1)) + mx.expand_dims(
+        x_norm = mx.fast.layer_norm(x, weight=None, bias=None, eps=1e-6)
+        x = x_norm * (1 + mx.expand_dims(scale, axis=1)) + mx.expand_dims(
             shift, axis=1
         )
         return x
@@ -421,8 +424,8 @@ class Attention(nn.Module):
 
         # `sample` projections.
         query = self.to_q(x)
-        key = self.to_k(x)
-        value = self.to_v(x)
+        key = self.to_k(x.astype(mx.float16))
+        value = self.to_v(x.astype(mx.float16))
 
         # apply rotary position embedding
         if rope is not None:
@@ -435,7 +438,6 @@ class Attention(nn.Module):
                 if xpos_scale is not None
                 else (1.0, 1.0)
             )
-
             query = apply_rotary_pos_emb(query, freqs, q_xpos_scale)
             key = apply_rotary_pos_emb(key, freqs, k_xpos_scale)
 
@@ -456,8 +458,8 @@ class Attention(nn.Module):
 
         x = mx.fast.scaled_dot_product_attention(
             q=query, k=key, v=value, scale=scale_factor, mask=attn_mask
-        )
-        x = x.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1).astype(query.dtype)
+        ).astype(mx.float16)
+        x = x.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         # linear proj
         x = self.to_out(x)
@@ -484,7 +486,7 @@ class DiTBlock(nn.Module):
             dropout=dropout,
         )
 
-        self.ff_norm = nn.LayerNorm(dim, affine=False, eps=1e-6)
+        #self.ff_norm = nn.LayerNorm(dim, affine=False, eps=1e-6)
         self.ff = FeedForward(
             dim=dim, mult=ff_mult, dropout=dropout, approximate="tanh"
         )
@@ -493,19 +495,20 @@ class DiTBlock(nn.Module):
         self, x, t, mask=None, rope=None
     ):  # x: noised input, t: time embedding
         # pre-norm & modulation for attention input
+        # Note: t can't be mx.float16!
         norm, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.attn_norm(x, emb=t)
 
         # attention
         attn_output = self.attn(x=norm, mask=mask, rope=rope)
 
         # process attention output for input x
-        x = x + mx.expand_dims(gate_msa, axis=1) * attn_output
-
-        norm = self.ff_norm(x) * (
-            1 + mx.expand_dims(scale_mlp, axis=1)
-        ) + mx.expand_dims(shift_mlp, axis=1)
-        ff_output = self.ff(norm)
-        x = x + mx.expand_dims(gate_mlp, axis=1) * ff_output
+        x = x + mx.expand_dims(gate_msa.astype(mx.float16), axis=1) * attn_output
+        x_norm = mx.fast.layer_norm(x, weight=None, bias=None, eps=1e-6)
+        norm = x_norm * (
+            1 + mx.expand_dims(scale_mlp.astype(mx.float16), axis=1)
+        ) + mx.expand_dims(shift_mlp.astype(mx.float16), axis=1)
+        ff_output = self.ff(norm.astype(mx.float16)).astype(mx.float16)
+        x = x + mx.expand_dims(gate_mlp.astype(mx.float16), axis=1) * ff_output
 
         return x
 
