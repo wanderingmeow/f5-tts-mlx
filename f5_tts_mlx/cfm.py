@@ -380,7 +380,7 @@ class F5TTS(nn.Module):
         cond_mask = rearrange(cond_mask, "... -> ... 1")
         step_cond = mx.where(
             cond_mask, cond, mx.zeros_like(cond)
-        ).astype(mx.float16)  # allow direct control (cut cond audio) with lens passed in
+        )  # allow direct control (cut cond audio) with lens passed in
         if batch > 1:
             mask = lens_to_mask(duration)
         else:
@@ -405,7 +405,7 @@ class F5TTS(nn.Module):
                 mask=mask,
                 drop_audio_cond=False,
                 drop_text=False,
-            ).astype(mx.float16)
+            )
             if cfg_strength < 1e-5:
                 return pred
 
@@ -417,7 +417,7 @@ class F5TTS(nn.Module):
                 mask=mask,
                 drop_audio_cond=True,
                 drop_text=True,
-            ).astype(mx.float16)
+            )
             return pred + (pred - null_pred) * cfg_strength
 
         # noise input
@@ -427,12 +427,12 @@ class F5TTS(nn.Module):
         for dur in duration:
             if exists(seed):
                 mx.random.seed(seed)
-            y0.append(mx.random.normal((dur, self.num_channels), dtype=mx.float16))
+            y0.append(mx.random.normal((dur, self.num_channels)))
         y0 = pad_sequence(y0, padding_value=0)
 
         t_start = 0
 
-        t = mx.linspace(t_start, 1, steps, dtype=mx.float16)
+        t = mx.linspace(t_start, 1, steps)
         if exists(sway_sampling_coef):
             t = t + sway_sampling_coef * (mx.cos(mx.pi / 2 * t) - 1 + t)
 

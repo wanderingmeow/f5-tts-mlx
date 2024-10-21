@@ -1,10 +1,8 @@
 ![F5 TTS diagram](f5tts.jpg)
 
-# F5 TTS — MLX (FP16)
+# F5 TTS — MLX
 
 Implementation of [F5-TTS](https://arxiv.org/abs/2410.06885), with the [MLX](https://github.com/ml-explore/mlx) framework.
-
-This modified version is optimized for FP16 models, enabling faster inference speeds without compromising output quality.
 
 F5 TTS is a non-autoregressive, zero-shot text-to-speech system using a flow-matching mel spectrogram generator with a diffusion transformer (DiT).
 
@@ -54,18 +52,6 @@ audio = f5tts.sample(...)
 ```
 
 Pretrained model weights are also available [on Hugging Face](https://huggingface.co/lucasnewman/f5-tts-mlx).
-
-## Convert Models from F32 to F16
-
-```python
-import torch
-from safetensors import safe_open
-from safetensors.mlx import save_file
-
-with safe_open('model_f32.safetensors', framework='pt') as f:
-	quantized_model = {key: (f.get_tensor(key).half() if f.get_tensor(key).dtype == torch.float32 else f.get_tensor(key)) for key in list(f.keys())}
-    save_file(quantized_model, 'model_f16.safetensors')
-```
 
 ## Appreciation
 

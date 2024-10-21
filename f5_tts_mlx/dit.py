@@ -184,7 +184,7 @@ class DiT(nn.Module):
         if self.long_skip_connection is not None:
             x = self.long_skip_connection(mx.concatenate((x, residual), axis=-1))
 
-        x = self.norm_out(x, t.astype(mx.float16))
+        x = self.norm_out(x, t)
         output = self.proj_out(x)
 
         return output

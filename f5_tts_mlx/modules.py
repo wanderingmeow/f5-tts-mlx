@@ -80,7 +80,7 @@ def precompute_freqs_cis(
     freqs = mx.outer(t, freqs).astype(mx.float32)  # type: ignore
     freqs_cos = freqs.cos()  # real part
     freqs_sin = freqs.sin()  # imaginary part
-    return mx.array(mx.concatenate([freqs_cos, freqs_sin], axis=-1), dtype=mx.float16)
+    return mx.array(mx.concatenate([freqs_cos, freqs_sin], axis=-1))
 
 
 def get_pos_embed_indices(start, length, max_pos, scale=1.0):
@@ -424,8 +424,8 @@ class Attention(nn.Module):
 
         # `sample` projections.
         query = self.to_q(x)
-        key = self.to_k(x.astype(mx.float16))
-        value = self.to_v(x.astype(mx.float16))
+        key = self.to_k(x)
+        value = self.to_v(x)
 
         # apply rotary position embedding
         if rope is not None:
@@ -458,7 +458,7 @@ class Attention(nn.Module):
 
         x = mx.fast.scaled_dot_product_attention(
             q=query, k=key, v=value, scale=scale_factor, mask=attn_mask
-        ).astype(mx.float16)
+        )
         x = x.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         # linear proj
@@ -502,13 +502,13 @@ class DiTBlock(nn.Module):
         attn_output = self.attn(x=norm, mask=mask, rope=rope)
 
         # process attention output for input x
-        x = x + mx.expand_dims(gate_msa.astype(mx.float16), axis=1) * attn_output
+        x = x + mx.expand_dims(gate_msa, axis=1) * attn_output
         x_norm = mx.fast.layer_norm(x, weight=None, bias=None, eps=1e-6)
         norm = x_norm * (
-            1 + mx.expand_dims(scale_mlp.astype(mx.float16), axis=1)
-        ) + mx.expand_dims(shift_mlp.astype(mx.float16), axis=1)
-        ff_output = self.ff(norm.astype(mx.float16)).astype(mx.float16)
-        x = x + mx.expand_dims(gate_mlp.astype(mx.float16), axis=1) * ff_output
+            1 + mx.expand_dims(scale_mlp, axis=1)
+        ) + mx.expand_dims(shift_mlp, axis=1)
+        ff_output = self.ff(norm)
+        x = x + mx.expand_dims(gate_mlp, axis=1) * ff_output
 
         return x
 
